@@ -1,0 +1,15 @@
+# Exclude backend from this frontend-only GitHub repository
+backend/
+
+# Environment & secrets
+frontend/.env.local
+frontend/.env.production.local
+
+# Dependencies & build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
