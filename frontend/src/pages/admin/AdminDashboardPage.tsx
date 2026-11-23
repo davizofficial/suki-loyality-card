@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Search,
   Stamp,
+  Ticket,
   Trash2,
   UserPlus,
   Users,
@@ -40,7 +41,7 @@ import type {
   CompleteTransactionResult,
 } from '../../types/loyalty';
 
-type TabKey = 'customers' | 'transactions' | 'scan';
+type TabKey = 'customers' | 'generate' | 'transactions' | 'scan';
 
 const DEFAULT_PRICES: Record<string, number> = {
   'Mango Juice|16 oz': 15000,
@@ -98,6 +99,14 @@ export default function AdminDashboardPage() {
   const [txnSubmitting, setTxnSubmitting] = useState(false);
   const [issuedResult, setIssuedResult] = useState<CompleteTransactionResult | null>(null);
 
+  // Quick Generate Kode Redeem state
+  const [genCustomerId, setGenCustomerId] = useState<string>('');
+  const [genProduct, setGenProduct] = useState<'Mango Juice' | 'Mango Smoothies'>('Mango Juice');
+  const [genSize, setGenSize] = useState<'16 oz' | '18 oz'>('16 oz');
+  const [genStamps, setGenStamps] = useState<number>(1);
+  const [genSubmitting, setGenSubmitting] = useState(false);
+  const [genResult, setGenResult] = useState<CompleteTransactionResult | null>(null);
+
   // Scan & adjust
   const [scanInput, setScanInput] = useState('');
   const [scanResult, setScanResult] = useState<AdminScanResult | null>(null);
@@ -121,12 +130,15 @@ export default function AdminDashboardPage() {
       if (custList.length > 0 && !txnCustomerId) {
         setTxnCustomerId(String(custList[0].id));
       }
+      if (custList.length > 0 && !genCustomerId) {
+        setGenCustomerId(String(custList[0].id));
+      }
     } catch (err) {
       setError(getApiError(err, 'Belum dapat mengambil data dashboard. Pastikan backend aktif.'));
     } finally {
       setLoading(false);
     }
-  }, [txnCustomerId]);
+  }, [txnCustomerId, genCustomerId]);
 
   useEffect(() => {
     if (!sessionStorage.getItem('suki_admin_token')) {
@@ -285,6 +297,42 @@ export default function AdminDashboardPage() {
     }
   }
 
+  async function handleQuickGenerateCode(event: FormEvent) {
+    event.preventDefault();
+    if (!genCustomerId) {
+      setError('Pilih pelanggan terlebih dahulu.');
+      return;
+    }
+    setGenSubmitting(true);
+    setError('');
+    setNotice('');
+    setGenResult(null);
+    try {
+      const unitPrice = DEFAULT_PRICES[`${genProduct}|${genSize}`] ?? 15000;
+      const created = await createAdminTransaction({
+        customer_id: Number(genCustomerId),
+        sales_channel: 'pre_order',
+        items: [
+          {
+            product_name: genProduct,
+            variant_size: genSize,
+            quantity_paid: genStamps,
+            quantity_free: 0,
+            unit_price: unitPrice,
+          },
+        ],
+      });
+      const result = await completeAdminTransaction(created.id);
+      setGenResult(result);
+      setNotice(`Kode redeem berhasil dibuat: ${result.redeem_code}`);
+      await refreshAll(search);
+    } catch (err) {
+      setError(getApiError(err, 'Gagal membuat kode redeem.'));
+    } finally {
+      setGenSubmitting(false);
+    }
+  }
+
   async function handleScanSubmit(event: FormEvent) {
     event.preventDefault();
     const token = extractCardToken(scanInput);
@@ -368,10 +416,17 @@ export default function AdminDashboardPage() {
         </button>
         <button
           type="button"
+          className={`admin-tab ${tab === 'generate' ? 'is-active' : ''}`}
+          onClick={() => setTab('generate')}
+        >
+          <Ticket size={15} /> Generate Kode Redeem
+        </button>
+        <button
+          type="button"
           className={`admin-tab ${tab === 'transactions' ? 'is-active' : ''}`}
           onClick={() => setTab('transactions')}
         >
-          <ReceiptText size={15} /> Transaksi &amp; Kode ({transactions.length})
+          <ReceiptText size={15} /> Transaksi ({transactions.length})
         </button>
         <button
           type="button"
@@ -505,6 +560,148 @@ export default function AdminDashboardPage() {
                     </article>
                   );
                 })}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {tab === 'generate' && (
+        <div className="admin-grid">
+          <form className="admin-card" onSubmit={handleQuickGenerateCode}>
+            <h2><Ticket size={18} /> Generate Kode Redeem</h2>
+            <p className="muted">
+              Buat kode redeem <code>SUKI-XXXX-XXXX</code> yang langsung terikat ke pelanggan terpilih (otomatis mencatat transaksi Pre-Order selesai).
+            </p>
+
+            <label htmlFor="g-customer">Pilih Pelanggan *</label>
+            <select
+              id="g-customer"
+              className="admin-select"
+              value={genCustomerId}
+              onChange={(e) => setGenCustomerId(e.target.value)}
+              required
+            >
+              <option value="">-- Pilih pelanggan --</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.whatsapp_number})
+                </option>
+              ))}
+            </select>
+
+            <div className="gen-product-row">
+              <div>
+                <label htmlFor="g-product">Produk</label>
+                <select
+                  id="g-product"
+                  className="admin-select"
+                  value={genProduct}
+                  onChange={(e) => setGenProduct(e.target.value as 'Mango Juice' | 'Mango Smoothies')}
+                >
+                  <option value="Mango Juice">Mango Juice</option>
+                  <option value="Mango Smoothies">Mango Smoothies</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="g-size">Ukuran</label>
+                <select
+                  id="g-size"
+                  className="admin-select"
+                  value={genSize}
+                  onChange={(e) => setGenSize(e.target.value as '16 oz' | '18 oz')}
+                >
+                  <option value="16 oz">16 oz</option>
+                  <option value="18 oz">18 oz</option>
+                </select>
+              </div>
+            </div>
+
+            <label htmlFor="g-stamps">Jumlah Stamp / Cup Berbayar *</label>
+            <div className="gen-stamp-pills">
+              {[1, 2, 3, 4].map((qty) => (
+                <button
+                  key={qty}
+                  type="button"
+                  className={`mini-btn ${genStamps === qty ? 'is-accent' : ''}`}
+                  onClick={() => setGenStamps(qty)}
+                >
+                  {qty} Stamp
+                </button>
+              ))}
+            </div>
+            <input
+              id="g-stamps"
+              type="number"
+              min={1}
+              max={20}
+              value={genStamps}
+              onChange={(e) => setGenStamps(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+              required
+            />
+
+            <button type="submit" className="primary-button" disabled={genSubmitting || customers.length === 0}>
+              {genSubmitting ? 'Membuat Kode...' : `GENERATE KODE (${genStamps} STAMP)`}
+            </button>
+          </form>
+
+          <section className="admin-card">
+            <h2>Hasil &amp; Status Kode Redeem</h2>
+            {genResult?.redeem_code ? (
+              <div className="issued-code-box">
+                <span className="eyebrow">KODE REDEEM BARU ({genResult.stamp_quantity} STAMP)</span>
+                <strong className="issued-code-value">{genResult.redeem_code}</strong>
+                <div className="issued-code-actions">
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => copyText('gen-code', genResult.redeem_code ?? '')}
+                  >
+                    {copiedKey === 'gen-code' ? <Check size={13} /> : <Copy size={13} />}
+                    {copiedKey === 'gen-code' ? 'Disalin' : 'Salin Kode'}
+                  </button>
+                  {genResult.customer_whatsapp && (
+                    <a
+                      className="mini-btn is-wa"
+                      href={`https://wa.me/${formatWaNumber(genResult.customer_whatsapp)}?text=${encodeURIComponent(
+                        `Halo sobat SUKI! Pesananmu sudah selesai. Klaim ${genResult.stamp_quantity} stamp kamu dengan kode redeem: *${genResult.redeem_code}* di ${appUrl}`,
+                      )}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <MessageCircle size={13} /> Kirim ke WhatsApp
+                    </a>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="muted">
+                Pilih pelanggan dan jumlah stamp di sebelah kiri lalu klik <b>GENERATE KODE</b> untuk membuat kode baru.
+              </p>
+            )}
+
+            <h3 className="admin-subheading">Riwayat Kode Redeem Terbaru</h3>
+            {transactions.filter((t) => t.redeem_code).length === 0 ? (
+              <p className="muted">Belum ada kode redeem yang diterbitkan.</p>
+            ) : (
+              <div className="admin-list">
+                {transactions
+                  .filter((t) => t.redeem_code)
+                  .slice(0, 8)
+                  .map((txn) => (
+                    <article className="admin-list-item" key={txn.id}>
+                      <div className="admin-item-title">
+                        <strong>{txn.customer?.name ?? `Customer #${txn.customer_id}`}</strong>
+                        <span className="badge-code">{txn.redeem_code?.stamp_quantity} Stamp</span>
+                        <span className={`badge-stamp ${txn.redeem_code?.status === 'redeemed' ? 'is-ready' : ''}`}>
+                          {txn.redeem_code?.status}
+                        </span>
+                      </div>
+                      <small className="muted">
+                        Transaksi {txn.transaction_code} · Rp {txn.total_amount.toLocaleString('id-ID')}
+                      </small>
+                    </article>
+                  ))}
               </div>
             )}
           </section>
